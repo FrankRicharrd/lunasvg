@@ -9,9 +9,9 @@
 
 namespace lunasvg {
 
-#define IS_ALPHA(c) ((c) >= 'a' && (c) <= 'z') || ((c) >= 'A' && (c) <= 'Z')
-#define IS_NUM(c) ((c) >= '0' && (c) <= '9')
-#define IS_WS(c) ((c) == ' ' || (c) == '\t' || (c) == '\n' || (c) == '\r')
+#define IS_ALPHA(c) (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+#define IS_NUM(c) (c >= '0' && c <= '9')
+#define IS_WS(c) (c == ' ' || c == '\t' || c == '\n' || c == '\r')
 
 namespace Utils {
 
@@ -29,15 +29,6 @@ inline const char* ltrim(const char* start, const char* end)
         ++start;
 
     return start;
-}
-
-inline bool skipDesc(const char*& ptr, const char* end, const char ch)
-{
-    if(ptr >= end || *ptr != ch)
-        return false;
-
-    ++ptr;
-    return true;
 }
 
 inline bool skipDesc(const char*& ptr, const char* end, const char* data)
@@ -58,20 +49,20 @@ inline bool skipDesc(const char*& ptr, const char* end, const char* data)
     return true;
 }
 
-inline bool skipUntil(const char*& ptr, const char* end, const char ch)
+inline bool skipUntil(const char*& ptr, const char* end, char delimiter)
 {
-    while(ptr < end && *ptr != ch)
+    while(ptr < end && *ptr != delimiter)
         ++ptr;
 
     return ptr < end;
 }
 
-inline bool skipUntil(const char*& ptr, const char* end, const char* data)
+inline bool skipUntil(const char*& ptr, const char* end, const char* delimiter)
 {
     while(ptr < end)
     {
         auto start = ptr;
-        if(skipDesc(start, end, data))
+        if(skipDesc(start, end, delimiter))
             break;
         ++ptr;
     }
@@ -79,20 +70,20 @@ inline bool skipUntil(const char*& ptr, const char* end, const char* data)
     return ptr < end;
 }
 
-inline bool readUntil(const char*& ptr, const char* end, const char ch, std::string& value)
+inline bool readUntil(const char*& ptr, const char* end, char delimiter, std::string& value)
 {
     auto start = ptr;
-    if(!skipUntil(ptr, end, ch))
+    if(!skipUntil(ptr, end, delimiter))
         return false;
 
     value.assign(start, ptr);
     return true;
 }
 
-inline bool readUntil(const char*& ptr, const char* end, const char* data, std::string& value)
+inline bool readUntil(const char*& ptr, const char* end, const char* delimiter, std::string& value)
 {
     auto start = ptr;
-    if(!skipUntil(ptr, end, data))
+    if(!skipUntil(ptr, end, delimiter))
         return false;
 
     value.assign(start, ptr);
@@ -107,7 +98,7 @@ inline bool skipWs(const char*& ptr, const char* end)
     return ptr < end;
 }
 
-inline bool skipWsDelimiter(const char*& ptr, const char* end, const char delimiter)
+inline bool skipWsDelimiter(const char*& ptr, const char* end, char delimiter)
 {
     if(ptr < end && !IS_WS(*ptr) && *ptr != delimiter)
         return false;
@@ -135,7 +126,7 @@ inline bool isIntegralDigit(char ch, int base)
         return ch - '0' < base;
 
     if(IS_ALPHA(ch))
-        return (ch >= 'a' && ch < 'a' + std::min(base, 36) - 10) || (ch >= 'A' && ch < 'A' + std::min(base, 36) - 10);
+        return (ch>='a'&&ch<'a'+std::min(base, 36)-10) || (ch>='A'&&ch<'A'+std::min(base, 36)-10);
 
     return false;
 }
@@ -151,31 +142,35 @@ inline bool parseInteger(const char*& ptr, const char* end, T& integer, int base
     using signed_t = typename std::make_signed<T>::type;
     const T maxMultiplier = intMax / static_cast<T>(base);
 
-    if(ptr < end && *ptr == '+')
-        ++ptr;
-    else if(ptr < end && isSigned && *ptr == '-')
+    if(ptr >= end)
+        return false;
+
+    if(isSigned && *ptr == '-')
     {
         ++ptr;
         isNegative = true;
     }
+    else if(*ptr == '+')
+        ++ptr;
 
     if(ptr >= end || !isIntegralDigit(*ptr, base))
         return false;
 
-    do {
+    int digitValue;
+    while(ptr < end && isIntegralDigit(*ptr, base))
+    {
         const char ch = *ptr++;
-        int digitValue;
         if(IS_NUM(ch))
             digitValue = ch - '0';
         else if(ch >= 'a')
             digitValue = ch - 'a' + 10;
         else
             digitValue = ch - 'A' + 10;
-
         if(value > maxMultiplier || (value == maxMultiplier && static_cast<T>(digitValue) > (intMax % static_cast<T>(base)) + isNegative))
             return false;
+
         value = static_cast<T>(base) * value + static_cast<T>(digitValue);
-    } while(ptr < end && isIntegralDigit(*ptr, base));
+    }
 
     if(isNegative)
         integer = -static_cast<signed_t>(value);
@@ -206,15 +201,13 @@ inline bool parseNumber(const char*& ptr, const char* end, T& number)
         sign = -1;
     }
 
-    if(ptr >= end || !(IS_NUM(*ptr) || *ptr == '.'))
+    if(ptr >= end || (!IS_NUM(*ptr) && *ptr != '.'))
         return false;
 
     if(*ptr != '.')
     {
-        do {
-            integer = static_cast<T>(10) * integer + (*ptr - '0');
-            ++ptr;
-        } while(ptr < end && IS_NUM(*ptr));
+        while(ptr < end && IS_NUM(*ptr))
+            integer = static_cast<T>(10) * integer + (*ptr++ - '0');
     }
 
     if(ptr < end && *ptr == '.')
@@ -222,14 +215,13 @@ inline bool parseNumber(const char*& ptr, const char* end, T& number)
         ++ptr;
         if(ptr >= end || !IS_NUM(*ptr))
             return false;
-
-        T divisor = 1;
-        do {
-            fraction = static_cast<T>(10) * fraction + (*ptr - '0');
-            divisor *= static_cast<T>(10);
-            ++ptr;
-        } while(ptr < end && IS_NUM(*ptr));
-        fraction /= divisor;
+        T div = 1;
+        while(ptr < end && IS_NUM(*ptr))
+        {
+            fraction = static_cast<T>(10) * fraction + (*ptr++ - '0');
+            div *= static_cast<T>(10);
+        }
+        fraction /= div;
     }
 
     if(ptr < end && (*ptr == 'e' || *ptr == 'E')
@@ -247,10 +239,8 @@ inline bool parseNumber(const char*& ptr, const char* end, T& number)
         if(ptr >= end || !IS_NUM(*ptr))
             return false;
 
-        do {
-            exponent = 10 * exponent + (*ptr - '0');
-            ++ptr;
-        } while(ptr < end && IS_NUM(*ptr));
+        while(ptr < end && IS_NUM(*ptr))
+            exponent = 10 * exponent + (*ptr++ - '0');
     }
 
     number = sign * (integer + fraction);
